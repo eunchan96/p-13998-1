@@ -1,16 +1,13 @@
 name: work-1
-
 on:
   push:
     paths:
       - '.github/workflows/**'
-      - 'src/**'
-      - 'build.gradle'
-      - 'Dockerfile'
       - 'index.html'
+      - 'build.gradle.kts'
+      - 'Dockerfile'
     branches:
       - main
-
 jobs:
   makeTagAndRelease:
     runs-on: ubuntu-latest
@@ -22,41 +19,47 @@ jobs:
         id: create_tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
-          # GITHUB_TOKEN 으로도 자동 푸시/태그 가능
           github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      # 기존 actions/create-release@v1 은 구버전이라 유지보수되는 액션으로 교체
       - name: Create Release
+        id: create_release
         uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.create_tag.outputs.new_tag }}     # 생성된 태그로 릴리스 생성
-          name: Release ${{ steps.create_tag.outputs.new_tag }} # 릴리스 이름
-          body: ${{ steps.create_tag.outputs.changelog }}       # 변경내역
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+        with:
+          tag_name: ${{ steps.create_tag.outputs.new_tag }}
+          release_name: Release ${{ steps.create_tag.outputs.new_tag }}
+          body: ${{ steps.create_tag.outputs.changelog }}
+          draft: false
+          prerelease: false
   buildImageAndPush:
     name: 도커 이미지 빌드와 푸시
     needs: makeTagAndRelease
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4  # 도커 컨텍스트용으로 필요
-
-      # Buildx는 build-push-action@v6 가 자동 준비하므로 별도 설치 스텝 제거
-      # 로그인도 최신 v3 액션으로 수행
+      - uses: actions/checkout@v4
+      - name: no.html 생성
+        env:
+          ACTIONS_STEP_DEBUG: true
+          NO_HTML: ${{ secrets.PRIVATE_HTML }}
+        run: echo "$NO_HTML" > src/private.html
+      - name: Docker Buildx 설치
+        uses: docker/setup-buildx-action@v2
       - name: 레지스트리 로그인
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      - name: set lower case owner name
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
+        env:
+          OWNER: '${{ github.repository_owner }}'
       - name: 빌드 앤 푸시
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/deploy:${{ needs.makeTagAndRelease.outputs.tag_name }}
+            ghcr.io/${{ env.OWNER_LC }}/deploy-3:${{ needs.makeTagAndRelease.outputs.tag_name }}
+            ghcr.io/${{ env.OWNER_LC }}/deploy-3:latest
